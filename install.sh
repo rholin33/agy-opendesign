@@ -247,7 +247,7 @@ assert_safe_rm_dir "$SHARE_DIR" "share-dir"
 assert_safe_rm_dir "$SKILL_DST" "skill-dir"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  printf '[dry-run] install payload (%s/{bin,scripts,skills,templates}) -> "%s"\n' "$SOURCE_DIR" "$SHARE_DIR"
+  printf '[dry-run] install payload (%s/{install.sh,bin,scripts,skills,templates}) -> "%s"\n' "$SOURCE_DIR" "$SHARE_DIR"
   printf '[dry-run] mkdir -p "%s"\n' "$BIN_DIR"
   printf '[dry-run] install -m 0755 "%s/bin/open-design-mcp" "%s"\n' "$SOURCE_DIR" "$MCP_DST"
   printf '[dry-run] install -m 0755 "%s/bin/open-design-cli" "%s"\n' "$SOURCE_DIR" "$CLI_DST"
@@ -255,11 +255,19 @@ if [ "$DRY_RUN" -eq 1 ]; then
 else
   # 1. Toolkit runtime payload
   mkdir -p "$SHARE_DIR"
-  for subdir in bin scripts skills templates; do
-    rm -rf "$SHARE_DIR/$subdir"
-    cp -R "$SOURCE_DIR/$subdir" "$SHARE_DIR/$subdir"
-  done
+  SOURCE_ABS="$(CDPATH= cd -- "$SOURCE_DIR" && pwd)"
+  SHARE_ABS="$(CDPATH= cd -- "$SHARE_DIR" && pwd)"
+  if [ "$SOURCE_ABS" != "$SHARE_ABS" ]; then
+    for subdir in bin scripts skills templates; do
+      rm -rf "$SHARE_DIR/$subdir"
+      cp -R "$SOURCE_DIR/$subdir" "$SHARE_DIR/$subdir"
+    done
+    if [ -f "$SOURCE_DIR/install.sh" ]; then
+      cp "$SOURCE_DIR/install.sh" "$SHARE_DIR/install.sh"
+    fi
+  fi
   chmod 0755 \
+    "$SHARE_DIR/install.sh" \
     "$SHARE_DIR/bin/open-design-mcp" \
     "$SHARE_DIR/bin/open-design-cli" \
     "$SHARE_DIR/scripts/od-sync-audit.mjs" \

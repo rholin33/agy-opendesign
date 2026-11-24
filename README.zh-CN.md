@@ -84,7 +84,7 @@ open "/Applications/Open Design.app"
 curl -fsSL https://raw.githubusercontent.com/rholin33/agy-opendesign/main/install.sh | sh -s -- --dry-run
 
 # 指定分支或标签
-AGY_OPENDESIGN_REF=main curl -fsSL https://raw.githubusercontent.com/rholin33/agy-opendesign/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/rholin33/agy-opendesign/main/install.sh | AGY_OPENDESIGN_REF=main sh
 
 # 本地克隆或自定义路径
 ./install.sh --bin-dir "$HOME/.local/bin" --share-dir "$HOME/.local/share/agy-opendesign" --skills-dir "$HOME/.gemini/config/skills" --app-path "/Applications/Open Design.app"

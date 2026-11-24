@@ -109,6 +109,9 @@ test("real install.sh + global od-sync-audit.mjs + install.sh --uninstall work e
     for (const expected of [
       path.join(binDir, "open-design-mcp"),
       path.join(binDir, "open-design-cli"),
+      path.join(shareDir, "install.sh"),
+      path.join(shareDir, "scripts/install.sh"),
+      path.join(shareDir, "scripts/uninstall.sh"),
       path.join(shareDir, "scripts/od-sync-audit.mjs"),
       path.join(shareDir, "scripts/init-project.sh"),
       path.join(shareDir, "templates/agents/rules/open-design.md"),
@@ -122,7 +125,13 @@ test("real install.sh + global od-sync-audit.mjs + install.sh --uninstall work e
     // Check executable bits
     fs.accessSync(path.join(binDir, "open-design-mcp"), fs.constants.X_OK);
     fs.accessSync(path.join(binDir, "open-design-cli"), fs.constants.X_OK);
+    fs.accessSync(path.join(shareDir, "install.sh"), fs.constants.X_OK);
     fs.accessSync(path.join(shareDir, "scripts/od-sync-audit.mjs"), fs.constants.X_OK);
+
+    // 1b. Re-running installed $SHARE_DIR/scripts/install.sh must be idempotent (must not wipe its own source)
+    const reinstall = runSync("sh", [path.join(shareDir, "scripts/install.sh"), "--no-mcp"], { env });
+    assert.equal(reinstall.status, 0, `reinstall from shareDir failed: ${reinstall.stderr}\n${reinstall.stdout}`);
+    assert.equal(fs.existsSync(path.join(shareDir, "scripts/od-sync-audit.mjs")), true);
 
     // 2. Simulate an arbitrary frontend repo with NO local scripts; invoke global od-sync-audit.mjs from cwd
     fs.mkdirSync(path.join(tmpProj, "src/styles"), { recursive: true });
@@ -148,8 +157,8 @@ test("real install.sh + global od-sync-audit.mjs + install.sh --uninstall work e
     assert.equal(report.solutionB.ready, true);
     assert.equal(report.solutionB.checks.globalSkill.ok, true);
 
-    // 3. Run real uninstall via install.sh --uninstall --no-mcp and verify clean removal
-    const uninst = runSync("sh", [path.join(REPO_ROOT, "install.sh"), "--uninstall", "--no-mcp"], { env });
+    // 3. Run real uninstall via installed $SHARE_DIR/scripts/uninstall.sh --no-mcp and verify clean removal
+    const uninst = runSync("sh", [path.join(shareDir, "scripts/uninstall.sh"), "--no-mcp"], { env });
     assert.equal(uninst.status, 0, `uninstall failed: ${uninst.stderr}\n${uninst.stdout}`);
 
     for (const removed of [
