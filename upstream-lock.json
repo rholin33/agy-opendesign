@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repo": "nexu-io/open-design",
+    "releaseTag": "open-design-v0.27.2",
+    "appVersion": "0.27.2",
+    "mcpServerName": "open-design",
+    "mcpServerVersion": "0.2.0",
+    "expectedMcpToolCount": 22,
+    "watchedPaths": [
+      "apps/daemon/src/mcp/",
+      "packages/sidecar/",
+      "apps/desktop/",
+      "plugins/_official/scenarios/"
+    ]
+  },
+  "client": {
+    "verifiedAgyVersion": "1.5.15"
+  }
+}

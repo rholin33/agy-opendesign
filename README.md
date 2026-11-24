@@ -92,11 +92,28 @@ curl -fsSL https://raw.githubusercontent.com/rholin33/agy-opendesign/main/instal
 
 Flags: `--uninstall`, `--dry-run`, `--bin-dir <dir>`, `--share-dir <dir>`, `--skills-dir <dir>`, `--app-path <path>`, `--agy-bin <path>`, `--no-mcp`.
 
-### Upgrade OpenDesign
+### Upgrade OpenDesign & Local Upstream Verification
 ```bash
+# Check upstream nexu-io/open-design releases, local app/brew/agy versions, and MCP compatibility
+node "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/check-upstream.mjs"
+# (or from a local clone: node scripts/check-upstream.mjs)
+
+# Upgrade OpenDesign when a new release is available
 brew upgrade --cask open-design
 ```
 Wrappers and dynamic sidecar discovery target stable paths inside `Open Design.app`, so OpenDesign upgrades work immediately with no MCP re-registration. If macOS sets a fresh quarantine flag on the updated bundle, run `open "/Applications/Open Design.app"` interactively once.
+
+**Periodic local check & release workflow (no CI/GitHub Actions required)**:
+- Use `agy`'s `/schedule` command to run `node scripts/check-upstream.mjs` periodically on your macOS machine (`UP_TO_DATE`, `UPSTREAM_UPDATE_AVAILABLE`, or `COMPAT_DRIFT`).
+- Optional email alerts on updates or drift (SMTP SSL/STARTTLS or Resend API; configure `~/.config/agy-opendesign/notify.env` with mode `0600`, e.g. `NOTIFY_TO=you@example.com`):
+  ```bash
+  node "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/check-upstream.mjs" --json \
+    | python3 "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/notify-email.py" --only-on-change
+  ```
+- When upgrading `agy-opendesign` for a new OpenDesign version:
+  1. `brew upgrade --cask open-design`
+  2. `node scripts/check-upstream.mjs` & `node --test tests/smoke.test.mjs`
+  3. Update `upstream-lock.json`, commit, and tag/release (`git tag vX.Y.Z && git push origin main --tags` or `gh release create vX.Y.Z`).
 
 ### One-Line Uninstall
 ```bash

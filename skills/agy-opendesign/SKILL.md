@@ -88,3 +88,8 @@ When the user asks to pull, merge, rebase, or reconcile upstream remote reposito
 - Follow the complete step-by-step playbook in [references/upstream-sync.md](./references/upstream-sync.md).
 - Run `node "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/od-sync-audit.mjs" --root . --base <upstream-ref> --json` transparently under the hood to classify drift (`redesign_isolated`, `thin_adapter_seam`, `upstream_ui`, `upstream_logic_config`).
 - Preserve upstream business logic on every seam conflict, align newly added upstream UI surfaces with `DESIGN.md` and `tokens.*`, and re-verify before handoff.
+- To check upstream `nexu-io/open-design` releases and local MCP/CLI compatibility (manually or via `/schedule`), run:
+  ```bash
+  node "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/check-upstream.mjs"
+  ```
+  When upgrading, run `brew upgrade --cask open-design`, re-verify `check-upstream.mjs` + `node --test tests/smoke.test.mjs`, update `upstream-lock.json`, and tag/release (`git tag vX.Y.Z && git push origin main --tags` or `gh release create`).

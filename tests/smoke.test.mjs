@@ -110,9 +110,11 @@ test("real install.sh + global od-sync-audit.mjs + install.sh --uninstall work e
       path.join(binDir, "open-design-mcp"),
       path.join(binDir, "open-design-cli"),
       path.join(shareDir, "install.sh"),
+      path.join(shareDir, "upstream-lock.json"),
       path.join(shareDir, "scripts/install.sh"),
       path.join(shareDir, "scripts/uninstall.sh"),
       path.join(shareDir, "scripts/od-sync-audit.mjs"),
+      path.join(shareDir, "scripts/check-upstream.mjs"),
       path.join(shareDir, "scripts/init-project.sh"),
       path.join(shareDir, "templates/agents/rules/open-design.md"),
       path.join(skillDir, "SKILL.md"),
@@ -127,6 +129,7 @@ test("real install.sh + global od-sync-audit.mjs + install.sh --uninstall work e
     fs.accessSync(path.join(binDir, "open-design-cli"), fs.constants.X_OK);
     fs.accessSync(path.join(shareDir, "install.sh"), fs.constants.X_OK);
     fs.accessSync(path.join(shareDir, "scripts/od-sync-audit.mjs"), fs.constants.X_OK);
+    fs.accessSync(path.join(shareDir, "scripts/check-upstream.mjs"), fs.constants.X_OK);
 
     // 1b. Re-running installed $SHARE_DIR/scripts/install.sh must be idempotent (must not wipe its own source)
     const reinstall = runSync("sh", [path.join(shareDir, "scripts/install.sh"), "--no-mcp"], { env });
@@ -311,3 +314,104 @@ test("bin/open-design-mcp responds to JSON-RPC initialize + tools/list (22 tools
   assert.equal(Array.isArray(responses[1].result.tools), true);
   assert.equal(responses[1].result.tools.length, 22);
 });
+
+test("scripts/check-upstream.mjs passes syntax check and --offline --json compatibility check", () => {
+  const scriptPath = path.join(REPO_ROOT, "scripts/check-upstream.mjs");
+  const syntax = runSync("node", ["--check", scriptPath]);
+  assert.equal(syntax.status, 0, syntax.stderr);
+
+  const invalid = runSync("node", [scriptPath, "--unknown-flag"]);
+  assert.equal(invalid.status, 2);
+
+  const odApp = process.env.OPEN_DESIGN_APP || "/Applications/Open Design.app";
+  if (process.platform !== "darwin" || !fs.existsSync(odApp)) {
+    return;
+  }
+
+  const res = runSync("node", [scriptPath, "--offline", "--json"]);
+  assert.equal(res.status, 0, `check-upstream failed: ${res.stdout}\n${res.stderr}`);
+  const report = JSON.parse(res.stdout);
+  assert.ok(
+    report.status === "UP_TO_DATE" || report.status === "UPSTREAM_UPDATE_AVAILABLE",
+    `unexpected status: ${report.status}`
+  );
+  assert.equal(report.remote.skipped, true);
+  assert.equal(report.compat.mcp.ok, true);
+  assert.equal(report.compat.mcp.toolCount, 22);
+  assert.equal(report.compat.cliDirections.ok, true);
+});
+
+test("scripts/notify-email.py syntax, --dry-run, --only-on-change, and missing-creds behavior", () => {
+  const notifyScript = path.join(REPO_ROOT, "scripts/notify-email.py");
+  assert.equal(fs.existsSync(notifyScript), true);
+
+  // AST syntax check (writes zero __pycache__ artifacts)
+  const astCheck = runSync("python3", [
+    "-c",
+    "import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))",
+    notifyScript
+  ]);
+  assert.equal(astCheck.status, 0, astCheck.stderr);
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-od-notify-"));
+  try {
+    const emptyEnv = path.join(tmpDir, "notify.env");
+    fs.writeFileSync(emptyEnv, "NOTIFY_TO=you@example.com\nSMTP_HOST=smtp.example.com\nSMTP_USER=you@example.com\nSMTP_PASS=\n");
+
+    const updateReportPath = path.join(tmpDir, "update-report.json");
+    fs.writeFileSync(
+      updateReportPath,
+      JSON.stringify({
+        status: "UPSTREAM_UPDATE_AVAILABLE",
+        checkedAt: "2026-01-01T00:00:00Z",
+        lock: { upstream: { repo: "nexu-io/open-design", releaseTag: "open-design-v0.27.2", appVersion: "0.27.2", mcpServerVersion: "0.2.0", expectedMcpToolCount: 22 } },
+        remote: { latestTag: "open-design-v0.28.0", watchedChanges: ["apps/daemon/src/mcp/index.ts"] },
+        local: { app: { installed: true, version: "0.27.2" } },
+        compat: { mcp: { ok: true, serverName: "open-design", serverVersion: "0.2.0", toolCount: 22 }, driftReasons: [] },
+        checklist: ["Upgrade local Open Design"]
+      })
+    );
+
+    const dry = runSync("python3", [
+      notifyScript,
+      "--env-file",
+      emptyEnv,
+      "--report-json",
+      updateReportPath,
+      "--dry-run"
+    ]);
+    assert.equal(dry.status, 0, dry.stderr);
+    assert.match(dry.stdout, /To: you@example\.com/);
+    assert.match(dry.stdout, /Subject: \[agy-opendesign\] UPSTREAM_UPDATE_AVAILABLE/);
+    assert.match(dry.stdout, /apps\/daemon\/src\/mcp\/index\.ts/);
+
+    // Missing credentials without --dry-run must exit non-zero cleanly
+    const noCreds = runSync("python3", [
+      notifyScript,
+      "--env-file",
+      emptyEnv,
+      "--report-json",
+      updateReportPath
+    ]);
+    assert.equal(noCreds.status, 1);
+    assert.match(noCreds.stderr, /no email transport credentials configured/i);
+
+    // --only-on-change with UP_TO_DATE must exit 0 without sending
+    const upToDatePath = path.join(tmpDir, "ok-report.json");
+    fs.writeFileSync(upToDatePath, JSON.stringify({ status: "UP_TO_DATE" }));
+    const skipped = runSync("python3", [
+      notifyScript,
+      "--env-file",
+      emptyEnv,
+      "--report-json",
+      upToDatePath,
+      "--only-on-change"
+    ]);
+    assert.equal(skipped.status, 0, skipped.stderr);
+    assert.match(skipped.stdout, /skipping email notification/i);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+

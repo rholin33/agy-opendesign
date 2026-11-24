@@ -92,11 +92,28 @@ curl -fsSL https://raw.githubusercontent.com/rholin33/agy-opendesign/main/instal
 
 支持参数：`--uninstall`、`--dry-run`、`--bin-dir <dir>`、`--share-dir <dir>`、`--skills-dir <dir>`、`--app-path <path>`、`--agy-bin <path>`、`--no-mcp`。
 
-### 升级 OpenDesign
+### 升级 OpenDesign 与本地周期上游巡检
 ```bash
+# 检查上游 nexu-io/open-design 新版本、本机 app/brew/agy 版本及 MCP 兼容性
+node "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/check-upstream.mjs"
+# （或在本地仓库中运行：node scripts/check-upstream.mjs）
+
+# 发现新版本后升级 OpenDesign
 brew upgrade --cask open-design
 ```
 包装脚本和动态 sidecar 发现均指向 `Open Design.app` 内的稳定路径，升级后无需重新注册 `agy mcp`。若新版带有新的隔离属性，交互式运行一次 `open "/Applications/Open Design.app"` 即可。
+
+**本地周期上游检查与发版流程（无需 GitHub Actions）**：
+- 可在 `agy` 中使用 `/schedule` 定期在本机 macOS 上运行 `node scripts/check-upstream.mjs`（输出 `UP_TO_DATE`、`UPSTREAM_UPDATE_AVAILABLE` 或 `COMPAT_DRIFT`）。
+- 可选邮件通知（支持 SMTP SSL/STARTTLS 与 Resend API；在 `~/.config/agy-opendesign/notify.env` 中配置 `NOTIFY_TO=you@example.com` 等字段并设置权限 `0600`）：
+  ```bash
+  node "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/check-upstream.mjs" --json \
+    | python3 "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/notify-email.py" --only-on-change
+  ```
+- 适配新版 OpenDesign 并发布时：
+  1. `brew upgrade --cask open-design`
+  2. `node scripts/check-upstream.mjs` 与 `node --test tests/smoke.test.mjs`
+  3. 更新 `upstream-lock.json` 并提交，随后打标发布（`git tag vX.Y.Z && git push origin main --tags` 或 `gh release create vX.Y.Z`）。
 
 ### 一行卸载
 ```bash

@@ -247,7 +247,7 @@ assert_safe_rm_dir "$SHARE_DIR" "share-dir"
 assert_safe_rm_dir "$SKILL_DST" "skill-dir"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  printf '[dry-run] install payload (%s/{install.sh,bin,scripts,skills,templates}) -> "%s"\n' "$SOURCE_DIR" "$SHARE_DIR"
+  printf '[dry-run] install payload (%s/{install.sh,upstream-lock.json,bin,scripts,skills,templates}) -> "%s"\n' "$SOURCE_DIR" "$SHARE_DIR"
   printf '[dry-run] mkdir -p "%s"\n' "$BIN_DIR"
   printf '[dry-run] install -m 0755 "%s/bin/open-design-mcp" "%s"\n' "$SOURCE_DIR" "$MCP_DST"
   printf '[dry-run] install -m 0755 "%s/bin/open-design-cli" "%s"\n' "$SOURCE_DIR" "$CLI_DST"
@@ -265,12 +265,17 @@ else
     if [ -f "$SOURCE_DIR/install.sh" ]; then
       cp "$SOURCE_DIR/install.sh" "$SHARE_DIR/install.sh"
     fi
+    if [ -f "$SOURCE_DIR/upstream-lock.json" ]; then
+      cp "$SOURCE_DIR/upstream-lock.json" "$SHARE_DIR/upstream-lock.json"
+    fi
   fi
   chmod 0755 \
     "$SHARE_DIR/install.sh" \
     "$SHARE_DIR/bin/open-design-mcp" \
     "$SHARE_DIR/bin/open-design-cli" \
     "$SHARE_DIR/scripts/od-sync-audit.mjs" \
+    "$SHARE_DIR/scripts/check-upstream.mjs" \
+    "$SHARE_DIR/scripts/notify-email.py" \
     "$SHARE_DIR/scripts/init-project.sh" \
     "$SHARE_DIR/scripts/install.sh" \
     "$SHARE_DIR/scripts/uninstall.sh"
