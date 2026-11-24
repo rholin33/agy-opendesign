@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+
+# Portable macOS stdio MCP wrapper for OpenDesign (Solution B).
+# Keeps Google Antigravity CLI (`agy`) as the primary ToS-compliant client
+# and avoids the macOS `/usr/bin/od` binary collision.
+
+OD_APP="${OPEN_DESIGN_APP:-/Applications/Open Design.app}"
+OD_HELPER="$OD_APP/Contents/Frameworks/Open Design Helper.app/Contents/MacOS/Open Design Helper"
+OD_RES="$OD_APP/Contents/Resources"
+OD_CLI="$OD_RES/app/prebundled/daemon/daemon-cli.mjs"
+OD_SIDECAR="$OD_RES/app/node_modules/@open-design/sidecar/dist/index.mjs"
+
+if [ ! -x "$OD_HELPER" ] || [ ! -f "$OD_CLI" ]; then
+  printf 'open-design-mcp: Open Design.app runtime not found under %s\n' "$OD_APP" >&2
+  printf 'Install Open Design (e.g. `brew install --cask open-design`) or set OPEN_DESIGN_APP.\n' >&2
+  exit 1
+fi
+
+export ELECTRON_RUN_AS_NODE=1
+export OD_RESOURCE_ROOT="${OD_RESOURCE_ROOT:-$OD_RES/open-design}"
+export OD_DATA_DIR="${OD_DATA_DIR:-$HOME/Library/Application Support/Open Design/namespaces/release-stable/data}"
+export OD_MCP_STDIO_IDLE_EXIT_MS="${OD_MCP_STDIO_IDLE_EXIT_MS:-0}"
+
+# Skip managed sidecar discovery/bootstrap when caller pins OD_DAEMON_URL or --daemon-url.
+HAS_DAEMON_FLAG=0
+for arg in "$@"; do
+  case "$arg" in
+    --daemon-url|--daemon-url=*) HAS_DAEMON_FLAG=1 ;;
+  esac
+done
+
+if [ -z "${OD_DAEMON_URL:-}" ] && [ "$HAS_DAEMON_FLAG" -eq 0 ]; then
+  export OD_MCP_BOOTSTRAP_COMMAND="/usr/bin/open"
+  if [ -z "${OD_MCP_BOOTSTRAP_ARGS:-}" ]; then
+    export OD_MCP_BOOTSTRAP_ARGS="$("$OD_HELPER" -e '
+      process.stdout.write(JSON.stringify(["-g", "-j", process.argv[1], "--args", "--headless", "--od-mcp-managed"]));
+    ' "$OD_APP")"
+  fi
+  if [ -z "${OD_MCP_DISCOVERY:-}" ] && [ -f "$OD_SIDECAR" ]; then
+    export OD_MCP_DISCOVERY="$("$OD_HELPER" -e '
+      const { resolveSidecarClientEndpoint } = require(process.argv[1]);
+      const base = { channel: "stable", namespace: "release-stable", source: "packaged" };
+      const out = {
+        daemon: ["runtime", "headless"].map((mode) => resolveSidecarClientEndpoint({ ...base, app: "daemon", mode })),
+        desktop: ["runtime", "headless"].map((mode) => resolveSidecarClientEndpoint({ ...base, app: "desktop", mode }))
+      };
+      process.stdout.write(JSON.stringify(out));
+    ' "$OD_SIDECAR")"
+  fi
+fi
+
+exec "$OD_HELPER" "$OD_CLI" mcp "$@"

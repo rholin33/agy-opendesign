@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+# Portable macOS CLI wrapper for OpenDesign (avoids `/usr/bin/od` collision).
+
+OD_APP="${OPEN_DESIGN_APP:-/Applications/Open Design.app}"
+OD_HELPER="$OD_APP/Contents/Frameworks/Open Design Helper.app/Contents/MacOS/Open Design Helper"
+OD_RES="$OD_APP/Contents/Resources"
+OD_CLI="$OD_RES/app/prebundled/daemon/daemon-cli.mjs"
+
+if [ ! -x "$OD_HELPER" ] || [ ! -f "$OD_CLI" ]; then
+  printf 'open-design-cli: Open Design.app runtime not found under %s\n' "$OD_APP" >&2
+  printf 'Install Open Design (e.g. `brew install --cask open-design`) or set OPEN_DESIGN_APP.\n' >&2
+  exit 1
+fi
+
+export ELECTRON_RUN_AS_NODE=1
+export OD_RESOURCE_ROOT="${OD_RESOURCE_ROOT:-$OD_RES/open-design}"
+export OD_DATA_DIR="${OD_DATA_DIR:-$HOME/Library/Application Support/Open Design/namespaces/release-stable/data}"
+
+exec "$OD_HELPER" "$OD_CLI" "$@"
