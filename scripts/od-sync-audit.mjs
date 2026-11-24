@@ -3,8 +3,12 @@
  * Generic OpenDesign <-> Frontend Upstream-Sync & Compliance Auditor (Solution B)
  * Zero external dependencies. Read-only on git history and source files.
  *
+ * Works both when invoked from the global installed toolkit
+ * (`$HOME/.local/share/agy-opendesign/scripts/od-sync-audit.mjs`) against `cwd`
+ * AND when copied into a project's `scripts/` directory.
+ *
  * Usage:
- *   node scripts/od-sync-audit.mjs [options]
+ *   node od-sync-audit.mjs [options]
  */
 
 import fs from "node:fs";
@@ -28,7 +32,18 @@ const AI_INDIGO_HEXES = new Set([
 ]);
 
 const STYLE_EXTENSIONS = new Set([".css", ".scss", ".sass", ".less"]);
-const FRONTEND_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte", ".css", ".scss", ".sass", ".less"]);
+const FRONTEND_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".vue",
+  ".svelte",
+  ".css",
+  ".scss",
+  ".sass",
+  ".less"
+]);
 
 function parseArgs(argv) {
   const opts = {
@@ -94,19 +109,20 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  process.stdout.write(`Usage: node scripts/od-sync-audit.mjs [options]
+  process.stdout.write(`Usage: node od-sync-audit.mjs [options]
 
 Audits upstream/local frontend drift, OpenDesign stylesheet compliance (P0/P1),
-and local Solution B (agy CLI + OpenDesign MCP) readiness.
+and local Solution B (agy CLI + OpenDesign MCP + global skill) readiness.
 
 Options:
-  --root <dir>          Repository root (default: parent of scripts/ or cwd)
+  --root <dir>          Repository root (default: cwd when run from global
+                        AGY_OPENDESIGN_HOME, otherwise parent of scripts/ or cwd)
   --src <dir>           Frontend source dir to scan (repeatable; auto-detects
                         src, apps/*/src, packages/*/src, frontend/src, web/src, client/src)
   --tokens <path>       Token stylesheet path excluded from raw-hex check (repeatable;
                         auto-detects **/tokens.{css,scss,less} & **/design-tokens.{css,scss})
   --redesign-dir <path> Isolated redesign layer path relative to root (default:
-                        auto-matches **/components/redesign/**)
+                        auto-matches **/components/redesign/** and **/redesign/**)
   --base <ref>          Git ref to diff against (default: @{upstream} -> origin/main
                         -> origin/master -> upstream/main -> HEAD)
   --strict              Also fail (exit 1) on P1 hygiene warnings (raw hexes or !important)
@@ -116,10 +132,22 @@ Options:
 `);
 }
 
+function isPathInside(parentDir, childDir) {
+  const rel = path.relative(path.resolve(parentDir), path.resolve(childDir));
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 function resolveRepoRoot(explicitRoot) {
   if (explicitRoot) return path.resolve(explicitRoot);
+  const shareHome = process.env.AGY_OPENDESIGN_HOME || path.join(os.homedir(), ".local/share/agy-opendesign");
+  if (isPathInside(shareHome, __dirname)) {
+    return process.cwd();
+  }
   if (path.basename(__dirname) === "scripts") {
-    return path.resolve(__dirname, "..");
+    const parent = path.resolve(__dirname, "..");
+    if (fs.existsSync(path.join(parent, ".git"))) {
+      return parent;
+    }
   }
   return process.cwd();
 }
@@ -221,7 +249,7 @@ function classifyFrontendPath(relPath, redesignDirRel, explicitTokenSet) {
     if (relPath === redesignDirRel || relPath.startsWith(`${redesignDirRel}/`)) {
       return "redesign_isolated";
     }
-  } else if (/(?:^|\/)components\/redesign\//.test(relPath)) {
+  } else if (/(?:^|\/)(?:components\/)?redesign\//.test(relPath)) {
     return "redesign_isolated";
   }
 
@@ -591,6 +619,7 @@ function auditSolutionBReadiness(repoRoot, skipSolutionB) {
   const home = os.homedir();
   const appPath = process.env.OPEN_DESIGN_APP || "/Applications/Open Design.app";
   const binDir = process.env.BIN_DIR || path.join(home, ".local/bin");
+  const skillsDir = process.env.SKILLS_DIR || path.join(home, ".gemini/config/skills");
 
   const checks = {
     openDesignMcpWrapper: checkFile(path.join(binDir, "open-design-mcp"), { executable: true }),
@@ -603,33 +632,27 @@ function auditSolutionBReadiness(repoRoot, skipSolutionB) {
         return null;
       }
     }),
-    designMd: checkFile(path.join(repoRoot, "DESIGN.md")),
-    skillsJson: checkFile(path.join(repoRoot, ".agents/skills.json"), {
-      jsonCheck: (cfg) => (Array.isArray(cfg?.entries) && cfg.entries.length > 0 ? null : "entries array empty")
+    globalSkill: checkFile(path.join(skillsDir, "agy-opendesign/SKILL.md"), {
+      frontmatterName: "agy-opendesign"
     }),
-    openDesignRule: checkFile(path.join(repoRoot, ".agents/rules/open-design.md")),
-    upstreamSyncSkill: checkFile(path.join(repoRoot, ".agents/skills/od-upstream-sync/SKILL.md"), {
-      frontmatterName: "od-upstream-sync"
-    }),
-    designRefineSkill: checkFile(path.join(repoRoot, ".agents/skills/od-design-refine/SKILL.md"), {
-      frontmatterName: "od-design-refine"
-    })
+    projectDesignMd: checkFile(path.join(repoRoot, "DESIGN.md")),
+    projectOpenDesignRule: checkFile(path.join(repoRoot, ".agents/rules/open-design.md"))
   };
+
+  const localSyncSkill = checkFile(path.join(repoRoot, ".agents/skills/od-upstream-sync/SKILL.md"), {
+    frontmatterName: "od-upstream-sync"
+  });
+  const hasSkill = checks.globalSkill.ok || localSyncSkill.ok;
 
   const bundleEntry = path.join(appPath, "Contents/Resources/app/prebundled/daemon/daemon-cli.mjs");
   const openDesignBundle = process.platform === "darwin"
     ? checkFile(bundleEntry)
     : { ok: true, path: bundleEntry, skipped: "non-macos" };
 
-  const requiredKeys = [
-    "openDesignMcpWrapper",
-    "agyMcpConfig",
-    "designMd",
-    "skillsJson",
-    "openDesignRule",
-    "upstreamSyncSkill"
-  ];
-  const missingRequired = requiredKeys.filter((k) => !checks[k].ok);
+  const missingRequired = [];
+  if (!checks.openDesignMcpWrapper.ok) missingRequired.push("openDesignMcpWrapper");
+  if (!checks.agyMcpConfig.ok) missingRequired.push("agyMcpConfig");
+  if (!hasSkill) missingRequired.push("globalSkill");
 
   return {
     skipped: false,
@@ -653,6 +676,13 @@ function buildChecklist(drift, styles, solutionB) {
     }
   }
 
+  if (!solutionB.skipped && solutionB.checks.projectDesignMd && !solutionB.checks.projectDesignMd.ok) {
+    actions.push("[Setup] Project DESIGN.md not found yet — curate one from OpenDesign MCP before refactoring UI.");
+  }
+  if (!solutionB.skipped && solutionB.checks.projectOpenDesignRule && !solutionB.checks.projectOpenDesignRule.ok) {
+    actions.push("[Setup] Project .agents/rules/open-design.md not found yet — add ToS & thin-adapter rules.");
+  }
+
   if (styles.p0.aiIndigo.length > 0) {
     actions.push(`[P0] Replace ${styles.p0.aiIndigo.length} AI indigo hex hit(s) with semantic tokens from your token stylesheet.`);
   }
@@ -672,7 +702,7 @@ function buildChecklist(drift, styles, solutionB) {
 
   if (drift.countsByLayer.upstream_ui > 0) {
     actions.push(
-      `[Sync] ${drift.countsByLayer.upstream_ui} upstream UI file(s) changed vs ${drift.baseRef ?? "working tree"}: align against DESIGN.md and run $od-design-refine if new surfaces were added.`
+      `[Sync] ${drift.countsByLayer.upstream_ui} upstream UI file(s) changed vs ${drift.baseRef ?? "working tree"}: align against DESIGN.md and run the 5-dimensional critique.`
     );
   }
   if (drift.countsByLayer.thin_adapter_seam > 0) {
@@ -684,7 +714,7 @@ function buildChecklist(drift, styles, solutionB) {
   if (actions.length === 0) {
     actions.push("[OK] Zero P0/P1 violations and Solution B is ready.");
   } else {
-    actions.push("[Verify] Re-run `node scripts/od-sync-audit.mjs --strict` plus your project typecheck, unit tests, and production build.");
+    actions.push("[Verify] Re-run od-sync-audit.mjs --strict plus your project typecheck, unit tests, and production build.");
   }
   return actions;
 }
@@ -738,7 +768,7 @@ function renderHumanReport(report) {
   } else {
     lines.push(`3. Solution B Readiness (${report.solutionB.ready ? "READY" : "INCOMPLETE"}):`);
     for (const [key, res] of Object.entries(report.solutionB.checks)) {
-      lines.push(`   - [${res.ok ? "OK" : "FAIL"}] ${key}: ${res.path}${res.ok ? "" : ` (${res.reason})`}`);
+      lines.push(`   - [${res.ok ? "OK" : "MISSING"}] ${key}: ${res.path}${res.ok ? "" : ` (${res.reason})`}`);
     }
     const b = report.solutionB.openDesignBundle;
     lines.push(`   - [${b.ok ? "OK" : "FAIL"}] openDesignBundle: ${b.path}${b.ok ? "" : ` (${b.reason})`}`);
@@ -771,13 +801,11 @@ function main() {
     process.exit(2);
   }
 
-  let srcDirs;
-  let drift;
   try {
-    srcDirs = discoverSrcDirs(repoRoot, opts.src);
+    const srcDirs = discoverSrcDirs(repoRoot, opts.src);
     const explicitTokenSet = new Set(opts.tokens.map((t) => normalizeRel(repoRoot, t)));
     const redesignDirRel = opts.redesignDir ? normalizeRel(repoRoot, opts.redesignDir) : null;
-    drift = collectGitDrift(repoRoot, srcDirs, redesignDirRel, explicitTokenSet, opts.base);
+    const drift = collectGitDrift(repoRoot, srcDirs, redesignDirRel, explicitTokenSet, opts.base);
     const styles = auditStyles(repoRoot, srcDirs, explicitTokenSet);
     const solutionB = auditSolutionBReadiness(repoRoot, opts.skipSolutionB);
 

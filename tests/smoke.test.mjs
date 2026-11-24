@@ -27,8 +27,9 @@ function runSync(cmd, args, opts = {}) {
   }
 }
 
-test("POSIX shell syntax check (`sh -n`) passes on all scripts and bin wrappers", () => {
+test("POSIX shell syntax check (`sh -n`) passes on root install.sh, bin wrappers, and scripts", () => {
   const shellFiles = [
+    "install.sh",
     "bin/open-design-mcp",
     "bin/open-design-cli",
     "scripts/install.sh",
@@ -43,38 +44,130 @@ test("POSIX shell syntax check (`sh -n`) passes on all scripts and bin wrappers"
   }
 });
 
-test("install.sh --dry-run and uninstall.sh --dry-run succeed without mutating filesystem", () => {
-  const tmpBin = fs.mkdtempSync(path.join(os.tmpdir(), "agy-od-dryrun-"));
-  try {
-    const inst = runSync("sh", [
-      path.join(REPO_ROOT, "scripts/install.sh"),
-      "--dry-run",
-      "--bin-dir",
-      tmpBin
-    ]);
-    assert.equal(inst.status, 0, inst.stderr);
-    assert.match(inst.stdout, /\[dry-run\] install -m 0755 .*open-design-mcp/);
-    assert.match(inst.stdout, /\[dry-run\] .*mcp add/);
-    assert.equal(fs.readdirSync(tmpBin).length, 0, "dry-run must not write files");
-
-    const uninst = runSync("sh", [
-      path.join(REPO_ROOT, "scripts/uninstall.sh"),
-      "--dry-run",
-      "--bin-dir",
-      tmpBin
-    ]);
-    assert.equal(uninst.status, 0, uninst.stderr);
-    assert.match(uninst.stdout, /\[dry-run\] .*mcp remove/);
-    assert.match(uninst.stdout, /\[dry-run\] rm -f .*open-design-mcp/);
-  } finally {
-    fs.rmSync(tmpBin, { recursive: true, force: true });
+test("unified global skill `skills/agy-opendesign/SKILL.md` has valid YAML frontmatter and references", () => {
+  const skillDir = path.join(REPO_ROOT, "skills/agy-opendesign");
+  const skillMd = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8");
+  assert.match(skillMd, /^---\r?\n[\s\S]*?\bname:\s*agy-opendesign\b[\s\S]*?\bdescription:/m);
+  for (const ref of [
+    "references/upstream-sync.md",
+    "references/critique-checklist.md",
+    "references/design-md-template.md"
+  ]) {
+    assert.equal(fs.existsSync(path.join(skillDir, ref)), true, `missing ${ref}`);
   }
 });
 
-test("init-project.sh bootstraps a scratch git repo and od-sync-audit.mjs detects clean vs dirty styles", () => {
+test("install.sh --dry-run (direct & piped) and --uninstall --dry-run do not mutate filesystem", () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "agy-od-dryrun-"));
+  try {
+    const env = { ...process.env, HOME: tmpHome };
+    const inst = runSync("sh", [path.join(REPO_ROOT, "install.sh"), "--dry-run"], { env });
+    assert.equal(inst.status, 0, inst.stderr);
+    assert.match(inst.stdout, /\[dry-run\] install payload/);
+    assert.match(inst.stdout, /\[dry-run\] install global skill/);
+    assert.match(inst.stdout, /\[dry-run\] .*mcp add/);
+
+    // Simulate `curl ... | sh -s -- --dry-run`
+    const installScript = fs.readFileSync(path.join(REPO_ROOT, "install.sh"), "utf8");
+    const pipedOut = execFileSync("sh", ["-s", "--", "--dry-run"], {
+      input: installScript,
+      encoding: "utf8",
+      env
+    });
+    assert.match(pipedOut, /\[dry-run\] download https:\/\/github\.com\/rholin33\/agy-opendesign\/archive\/refs\/heads\/main\.tar\.gz/);
+
+    const uninst = runSync("sh", [path.join(REPO_ROOT, "install.sh"), "--uninstall", "--dry-run"], { env });
+    assert.equal(uninst.status, 0, uninst.stderr);
+    assert.match(uninst.stdout, /\[dry-run\] rm -rf .*agy-opendesign/);
+    assert.equal(fs.readdirSync(tmpHome).length, 0, "dry-run must not write anything into HOME");
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+test("real install.sh + global od-sync-audit.mjs + install.sh --uninstall work end-to-end in isolated HOME", () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agy-od-e2e-"));
+  const tmpHome = path.join(tmpRoot, "home");
+  const tmpProj = path.join(tmpRoot, "sample-project");
+  fs.mkdirSync(tmpHome, { recursive: true });
+  fs.mkdirSync(tmpProj, { recursive: true });
+
+  try {
+    const env = { ...process.env, HOME: tmpHome };
+    delete env.BIN_DIR;
+    delete env.AGY_OPENDESIGN_HOME;
+    delete env.SKILLS_DIR;
+
+    // 1. Run real install.sh with --no-mcp into isolated HOME
+    const inst = runSync("sh", [path.join(REPO_ROOT, "install.sh"), "--no-mcp"], { env });
+    assert.equal(inst.status, 0, `install failed: ${inst.stderr}\n${inst.stdout}`);
+
+    const shareDir = path.join(tmpHome, ".local/share/agy-opendesign");
+    const binDir = path.join(tmpHome, ".local/bin");
+    const skillDir = path.join(tmpHome, ".gemini/config/skills/agy-opendesign");
+
+    for (const expected of [
+      path.join(binDir, "open-design-mcp"),
+      path.join(binDir, "open-design-cli"),
+      path.join(shareDir, "scripts/od-sync-audit.mjs"),
+      path.join(shareDir, "scripts/init-project.sh"),
+      path.join(shareDir, "templates/agents/rules/open-design.md"),
+      path.join(skillDir, "SKILL.md"),
+      path.join(skillDir, "references/upstream-sync.md"),
+      path.join(skillDir, "references/critique-checklist.md"),
+      path.join(skillDir, "references/design-md-template.md")
+    ]) {
+      assert.equal(fs.existsSync(expected), true, `missing installed file: ${expected}`);
+    }
+    // Check executable bits
+    fs.accessSync(path.join(binDir, "open-design-mcp"), fs.constants.X_OK);
+    fs.accessSync(path.join(binDir, "open-design-cli"), fs.constants.X_OK);
+    fs.accessSync(path.join(shareDir, "scripts/od-sync-audit.mjs"), fs.constants.X_OK);
+
+    // 2. Simulate an arbitrary frontend repo with NO local scripts; invoke global od-sync-audit.mjs from cwd
+    fs.mkdirSync(path.join(tmpProj, "src/styles"), { recursive: true });
+    fs.writeFileSync(path.join(tmpProj, "src/styles/tokens.css"), ":root { --bg: #f8f7f4; --fg: #1c1f22; }\n");
+    fs.writeFileSync(path.join(tmpProj, "src/app.css"), ".page { background: var(--bg); color: var(--fg); }\n");
+    fs.writeFileSync(path.join(tmpProj, "DESIGN.md"), "# Sample Design System\n");
+
+    // Seed fake mcp_config.json in isolated HOME so full Solution B readiness passes
+    fs.mkdirSync(path.join(tmpHome, ".gemini/config"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, ".gemini/config/mcp_config.json"),
+      JSON.stringify({ mcpServers: { "open-design": { command: path.join(binDir, "open-design-mcp"), disabled: false } } })
+    );
+
+    const globalAudit = runSync("node", [path.join(shareDir, "scripts/od-sync-audit.mjs"), "--strict", "--json"], {
+      cwd: tmpProj,
+      env
+    });
+    assert.equal(globalAudit.status, 0, `global audit failed: ${globalAudit.stdout}\n${globalAudit.stderr}`);
+    const report = JSON.parse(globalAudit.stdout);
+    assert.equal(fs.realpathSync(report.repoRoot), fs.realpathSync(tmpProj), "global audit must default repoRoot to cwd");
+    assert.equal(report.ok, true);
+    assert.equal(report.solutionB.ready, true);
+    assert.equal(report.solutionB.checks.globalSkill.ok, true);
+
+    // 3. Run real uninstall via install.sh --uninstall --no-mcp and verify clean removal
+    const uninst = runSync("sh", [path.join(REPO_ROOT, "install.sh"), "--uninstall", "--no-mcp"], { env });
+    assert.equal(uninst.status, 0, `uninstall failed: ${uninst.stderr}\n${uninst.stdout}`);
+
+    for (const removed of [
+      path.join(binDir, "open-design-mcp"),
+      path.join(binDir, "open-design-cli"),
+      skillDir,
+      shareDir
+    ]) {
+      assert.equal(fs.existsSync(removed), false, `expected removed by uninstall: ${removed}`);
+    }
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("init-project.sh + od-sync-audit.mjs detect clean vs dirty styles in a scratch git repo", () => {
   const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), "agy-od-init-"));
   try {
-    // Initialize scratch git repo with a clean starter frontend
     assert.equal(runSync("git", ["init", "-b", "main"], { cwd: tmpRepo }).status, 0);
     assert.equal(runSync("git", ["config", "user.name", "Test User"], { cwd: tmpRepo }).status, 0);
     assert.equal(runSync("git", ["config", "user.email", "test@example.com"], { cwd: tmpRepo }).status, 0);
@@ -92,28 +185,9 @@ test("init-project.sh bootstraps a scratch git repo and od-sync-audit.mjs detect
     assert.equal(runSync("git", ["add", "."], { cwd: tmpRepo }).status, 0);
     assert.equal(runSync("git", ["commit", "-m", "init"], { cwd: tmpRepo }).status, 0);
 
-    // Bootstrap via init-project.sh
     const initRes = runSync("sh", [path.join(REPO_ROOT, "scripts/init-project.sh"), tmpRepo]);
     assert.equal(initRes.status, 0, initRes.stderr);
 
-    for (const expected of [
-      ".agents/skills.json",
-      ".agents/rules/open-design.md",
-      ".agents/skills/od-design-refine/SKILL.md",
-      ".agents/skills/od-upstream-sync/SKILL.md",
-      "scripts/od-sync-audit.mjs",
-      "DESIGN.md"
-    ]) {
-      assert.equal(fs.existsSync(path.join(tmpRepo, expected)), true, `missing bootstrapped ${expected}`);
-    }
-
-    // Verify skills.json is valid JSON and excluded in .git/info/exclude
-    const skillsJson = JSON.parse(fs.readFileSync(path.join(tmpRepo, ".agents/skills.json"), "utf8"));
-    assert.ok(Array.isArray(skillsJson.entries) && skillsJson.entries.length === 2);
-    const excludeText = fs.readFileSync(path.join(tmpRepo, ".git/info/exclude"), "utf8");
-    assert.match(excludeText, /^\.agents\/skills\.json$/m);
-
-    // Run audit on clean repo (--skip-solution-b keeps test independent of host ~/.gemini config)
     const cleanAudit = runSync("node", [
       path.join(tmpRepo, "scripts/od-sync-audit.mjs"),
       "--root",
@@ -122,14 +196,12 @@ test("init-project.sh bootstraps a scratch git repo and od-sync-audit.mjs detect
       "--skip-solution-b",
       "--json"
     ]);
-    assert.equal(cleanAudit.status, 0, `expected clean audit pass: ${cleanAudit.stdout}\n${cleanAudit.stderr}`);
+    assert.equal(cleanAudit.status, 0, cleanAudit.stdout);
     const cleanReport = JSON.parse(cleanAudit.stdout);
     assert.equal(cleanReport.ok, true);
     assert.equal(cleanReport.summary.p0ViolationCount, 0);
     assert.equal(cleanReport.summary.p1WarningCount, 0);
-    assert.deepEqual(cleanReport.styles.tokenFiles, ["src/styles/tokens.css"]);
 
-    // Inject P0 + P1 violations into a dirty stylesheet and confirm non-zero failure
     fs.writeFileSync(
       path.join(tmpRepo, "src/dirty.css"),
       [
