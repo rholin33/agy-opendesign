@@ -15,6 +15,7 @@
 - Use `$HOME/.local/bin/open-design-cli` for OpenDesign CLI commands (e.g. `tools directions --json`, `lint`) and `$HOME/.local/bin/open-design-mcp` for MCP stdio.
 
 ## Upstream-Sync & Redesign Isolation
+- **Dedicated Refactor Branch by Default**: Before making frontend refactoring edits on a git repository, automatically create and switch to a dedicated feature branch via `git checkout -b feat/opendesign-redesign-<YYYYMMDD>` (or `feat/opendesign-<topic>`) rather than editing directly on `main`/`master`/the default branch (skip only if already on a dedicated `opendesign` branch or the user explicitly instructs staying on the current branch). Preserve uncommitted changes without rewriting history, and never push to a remote unless explicitly asked.
 - Keep structural UI redesign components isolated under `components/redesign/` (and design tokens in a dedicated `tokens.css` / `tokens.scss`), mounted via thin prop adapters in upstream pages so remote git updates merge cleanly.
 - After any upstream `git pull` / `git merge` / `git rebase`, run `node scripts/od-sync-audit.mjs --strict` to detect frontend drift and OpenDesign P0/P1 regressions.
 - Follow the `od-upstream-sync` skill (`.agents/skills/od-upstream-sync/SKILL.md`) for repeatable upstream reconciliation and OpenDesign upgrades.

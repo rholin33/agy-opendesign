@@ -5,10 +5,11 @@ description: >-
   verifies OpenDesign MCP & project setup, curates DESIGN.md and WCAG AA tokens
   from OpenDesign resources, executes upstream-safe thin-adapter frontend
   redesigns (Home, Workflow, layouts, components), runs automated anti-AI-slop
-  audits and 5-dimensional visual critique, and reconciles remote upstream git
-  updates. Activate whenever the user asks to use OpenDesign, redesign or polish
-  a frontend UI, create/update DESIGN.md, or sync upstream repo changes with an
-  OpenDesign layer.
+  audits, 5-dimensional visual critique, and interactive Review WebUI handoff,
+  and reconciles remote upstream git updates. Activate whenever the user asks to
+  use OpenDesign, redesign or polish a frontend UI, create/update DESIGN.md,
+  generate a visual OpenDesign review dashboard/guide, or sync upstream repo
+  changes with an OpenDesign layer.
 ---
 
 # OpenDesign All-in-One Workflow (`agy-opendesign`)
@@ -21,6 +22,7 @@ Operate the **entire** OpenDesign lifecycle directly inside `agy` — **never as
 2. **macOS `/usr/bin/od` Shadow**: Never invoke bare `od`. Always use `"$HOME/.local/bin/open-design-cli"` and `"$HOME/.local/bin/open-design-mcp"`.
 3. **Preserve Upstream Contracts**: Keep all uncommitted user work, business logic (`services/`, `api/`, `hooks/`, `store/`), routing, and frozen copy/test invariants intact.
 4. **Never Bypass OS Security**: Never strip `com.apple.quarantine` or bypass Gatekeeper/TCC. If a fresh Open Design install pauses on a first-launch macOS dialog, ask the user to run `open "/Applications/Open Design.app"` interactively once.
+5. **Dedicated Refactor Branch by Default**: Before making any frontend refactoring edits on a git repository, automatically create and switch to a dedicated feature branch (e.g., `git checkout -b feat/opendesign-redesign-<YYYYMMDD>` or `feat/opendesign-<topic>`) rather than editing directly on `main`/`master`/the default branch (skip only if already on a dedicated `opendesign` branch or the user explicitly instructs staying on the current branch). Always use `git checkout -b <branch>` so existing uncommitted working-tree changes are preserved safely without rewriting history; never push the branch to a remote unless the user explicitly asks.
 
 ---
 
@@ -35,6 +37,9 @@ Operate the **entire** OpenDesign lifecycle directly inside `agy` — **never as
 2. Ensure project-local guardrails exist (create silently if missing, without clobbering existing files):
    - If `.agents/rules/open-design.md` is missing, create it with the ToS boundary and `redesign/` thin-adapter isolation rule (use `"${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/templates/agents/rules/open-design.md"` as reference).
    - If `DESIGN.md` is missing, proceed to Step 2 to author a tailored `DESIGN.md` (reference template in [references/design-md-template.md](./references/design-md-template.md)).
+3. Ensure a dedicated refactor branch is active before any frontend edits (default behavior on git repositories):
+   - Check the current branch (`git branch --show-current`). If on `main`, `master`, or another non-`opendesign` default branch (and the user has not explicitly asked to stay on the current branch), automatically create and switch to a new branch via `git checkout -b feat/opendesign-redesign-<YYYYMMDD>` (or `feat/opendesign-<topic>`).
+   - `git checkout -b` safely carries over any existing uncommitted working-tree changes without rewriting git history. Do not push the new branch to a remote unless explicitly requested by the user.
 
 ---
 
@@ -78,6 +83,28 @@ After implementing changes:
 2. Run the project's typecheck, unit tests, and production build(s). Never suppress failures by weakening test assertions.
 3. Inspect live rendered views (mobile `390x844` + desktop `>=1280px`) whenever a local preview can be started, checking zero console/page errors, zero broken images, zero horizontal overflow, and clean responsive controls.
 4. Execute the **Five-Dimensional Critique & Surgical Polish Loop** in [references/critique-checklist.md](./references/critique-checklist.md) (target `>= 4/5` on every axis, max 3 focused polish passes).
+
+### Interactive Review WebUI Handoff
+
+Whenever completing a frontend redesign/audit or when the user asks for a visual dashboard, guide, or live/interactive Review WebUI, prefer launching the **OpenDesign Local Design Studio WebUI (`--serve --open`)** (or offer this one-command live launch):
+
+```bash
+node "${AGY_OPENDESIGN_HOME:-$HOME/.local/share/agy-opendesign}/scripts/od-review-ui.mjs" \
+  --root . \
+  --screenshots <screenshot-dir> \
+  --serve --port 4310 --open
+```
+
+- **Auto-port & offline snapshot**: automatically falls back to the next free port if `4310` is busy and writes/updates the static snapshot at `docs/design/opendesign-review-ui.html` (opens cleanly offline via `file://` with zero console errors; use `--out docs/design/opendesign-review-ui.html` without `--serve` for static-only generation).
+- **6 Human-in-the-Loop Studio Capabilities (`--serve`)**:
+  1. **Live Audit Refresh**: re-run `od-sync-audit.mjs` on demand (`POST /api/audit`) with live P0/P1 counters and log output.
+  2. **Brief & Design Systems Picker**: choose from 5 built-in directions and 154 Design Systems, author an 8-dimensional design brief (`docs/design/design-brief.json`), and copy a structured launch prompt.
+  3. **Live Token Studio & `DESIGN.md` Diff Editor**: edit color/scrim tokens with instant preview + live iframe CSS injection and confirmed save-back (`POST /api/tokens/save`), alongside a `DESIGN.md` editor with live line-diff preview and rollback (`POST /api/design-md/save`).
+  4. **Visual Pinboard, Before/After Slider & Embedded H5 Preview**: click-to-annotate screenshots (`docs/design/od-annotations.json` + one-click `$od-design-refine` prompt export), drag Before/After comparison sliders, and inspect the embedded `/preview/` H5 iframe at `390x844` / `768x1024` / `1280x800`.
+  5. **Interactive 5-Axis Human Critique & Rules Memory**: score and annotate all 5 visual axes (`docs/design/od-critique.json`) and manage project-level Do/Don't rules (`docs/design/od-rules.json`).
+  6. **Interactive Onboarding & Upstream-Sync Guide**: step-by-step `/swarm`, `agy-opendesign`, and Step 5 upstream-sync commands with click-to-copy.
+- **ToS Boundary (Solution B)**: human decisions persist exclusively to local JSON/Markdown artifacts and export structured prompts for `agy` — never invoke `start_run(agent: "antigravity")`.
+- **Handoff output**: always provide the active live `http://127.0.0.1:<port>` URL (or the one-command `--serve --port 4310 --open` launch) and the clickable `file://` path to `docs/design/opendesign-review-ui.html`.
 
 ---
 
